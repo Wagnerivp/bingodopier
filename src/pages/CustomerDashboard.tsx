@@ -14,7 +14,9 @@ export default function CustomerDashboard() {
   const [loading, setLoading] = useState(true);
   const [buyAmount, setBuyAmount] = useState(1);
   const [isBuying, setIsBuying] = useState(false);
-  const [precoCartela, setPrecoCartela] = useState(10);
+  const [precoCartela, setPrecoCartela] = useState(1);
+  const [previewCartela, setPreviewCartela] = useState<number[][] | null>(null);
+  const [showWinnerAnim, setShowWinnerAnim] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem('bingo_customer');
@@ -37,14 +39,23 @@ export default function CustomerDashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rodadas' }, (payload) => {
         const updated = payload.new as Rodada;
         if (updated.status === 'aberta' || updated.status === 'em_andamento' || updated.status === 'finalizada') {
-           setActiveRodada(updated);
-           if (updated.status === 'finalizada' && updated.ganhador_cartela_cheia === parsedCustomer.id) {
-               confetti({
-                 particleCount: 150,
-                 spread: 100,
-                 origin: { y: 0.6 }
-               });
-           }
+           setActiveRodada(prev => {
+              if (prev) {
+                 if (updated.ganhador_linha_1 === parsedCustomer.id && !prev.ganhador_linha_1) {
+                    setShowWinnerAnim('linha_1');
+                    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+                 }
+                 if (updated.ganhador_linha_2 === parsedCustomer.id && !prev.ganhador_linha_2) {
+                    setShowWinnerAnim('linha_2');
+                    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+                 }
+                 if (updated.ganhador_cartela_cheia === parsedCustomer.id && !prev.ganhador_cartela_cheia) {
+                    setShowWinnerAnim('cartela_cheia');
+                    confetti({ particleCount: 200, spread: 100, origin: { y: 0.6 } });
+                 }
+              }
+              return updated;
+           });
         } else {
            fetchActiveRodada();
         }
@@ -95,15 +106,15 @@ export default function CustomerDashboard() {
   };
 
   const handleBuy = async (method: 'pago' | 'fiado') => {
-    if (!customer || !activeRodada) return;
+    if (!customer || !activeRodada || !previewCartela) return;
     
     const currentCount = cartelas.filter(c => c.rodada_id === activeRodada.id).length;
-    if (currentCount + buyAmount > 5) {
+    if (currentCount >= 5) {
       alert(`Você já possui ${currentCount} cartela(s). O máximo permitido por rodada é 5.`);
       return;
     }
 
-    const totalCost = precoCartela * buyAmount;
+    const totalCost = precoCartela;
     
     if (method === 'pago' && customer.saldo_carteira < totalCost) {
       alert('Saldo insuficiente na carteira. Adicione saldo via PIX ou compre no Fiado.');
@@ -113,17 +124,14 @@ export default function CustomerDashboard() {
     setIsBuying(true);
 
     try {
-      const newCartelas = Array.from({ length: buyAmount }).map(() => ({
+      await supabase!.from('cartelas').insert([{
         customer_id: customer.id,
         rodada_id: activeRodada.id,
-        numeros_json: generateBingoCard(),
+        numeros_json: previewCartela,
         status_pagamento: method,
         preco: precoCartela
-      }));
-
-      await supabase!.from('cartelas').insert(newCartelas);
+      }]);
       
-      // Both reduce balance (Fiado allows negative balance)
       await supabase!.from('customers').update({
         saldo_carteira: customer.saldo_carteira - totalCost
       }).eq('id', customer.id);
@@ -135,7 +143,7 @@ export default function CustomerDashboard() {
         origin: { y: 0.8 }
       });
 
-      setBuyAmount(1);
+      setPreviewCartela(null);
     } catch (error) {
       console.error(error);
       alert('Erro ao comprar cartelas');
@@ -254,34 +262,12 @@ export default function CustomerDashboard() {
                     </div>
                   ) : (
                     <>
-                      <p className="text-xs text-gray-300 mb-3 font-bold uppercase tracking-widest">Comprar Cartelas <span className="text-yellow-500 font-mono">(R$ {precoCartela.toFixed(2)})</span></p>
-                      <div className="flex gap-3 items-center mb-4">
-                        <button 
-                          onClick={() => setBuyAmount(Math.max(1, buyAmount - 1))}
-                          className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white font-bold"
-                        >-</button>
-                        <div className="flex-1 text-center font-bold text-xl">{buyAmount}</div>
-                        <button 
-                          onClick={() => setBuyAmount(Math.min(5 - activeCartelas.length, buyAmount + 1))}
-                          className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white font-bold"
-                        >+</button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <button 
-                          disabled={isBuying}
-                          onClick={() => handleBuy('pago')}
-                          className="py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:opacity-90 text-black font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                          <Wallet className="w-4 h-4" /> Usar Saldo
-                        </button>
-                        <button 
-                          disabled={isBuying}
-                          onClick={() => handleBuy('fiado')}
-                          className="py-3 rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-700 hover:opacity-90 text-black font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                          <Plus className="w-4 h-4" /> Fiado
-                        </button>
-                      </div>
+                      <button 
+                        onClick={() => setPreviewCartela(generateBingoCard())}
+                        className="w-full py-4 rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-700 hover:opacity-90 text-black font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center shadow-[0_0_15px_rgba(212,175,55,0.3)]"
+                      >
+                        Comprar Cartela (R$ {precoCartela.toFixed(2)})
+                      </button>
                     </>
                   )}
                 </div>
@@ -353,7 +339,7 @@ export default function CustomerDashboard() {
                   <div className="grid grid-cols-5 gap-1">
                     {cartela.numeros_json.map((row, rIdx) => 
                       row.map((num, cIdx) => {
-                        const isMarked = activeRodada?.bolas_sorteadas.includes(num);
+                        const isMarked = activeRodada?.bolas_sorteadas?.includes(num);
                         const isFree = num === 0;
                         return (
                           <div 
@@ -383,6 +369,86 @@ export default function CustomerDashboard() {
           </div>
         </section>
       </div>
+
+      {previewCartela && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-white/10 rounded-3xl p-6 max-w-sm w-full text-center shadow-2xl">
+            <h2 className="text-lg font-bold text-white uppercase tracking-widest mb-4">Escolha sua Cartela</h2>
+            
+            <div className="bg-black/40 border border-white/5 rounded-2xl p-4 mb-6">
+               <div className="grid grid-cols-5 gap-1 text-center mb-2">
+                 {['B', 'I', 'N', 'G', 'O'].map((l) => (
+                   <div key={l} className="text-yellow-500 font-black text-sm">{l}</div>
+                 ))}
+               </div>
+               <div className="grid grid-cols-5 gap-2">
+                 {previewCartela.map((row, rIdx) => 
+                   row.map((num, cIdx) => (
+                     <div key={`${rIdx}-${cIdx}`} className={cn(
+                        "aspect-square flex items-center justify-center rounded-lg text-base font-bold",
+                        num === 0 ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30" : "bg-white/5 text-white"
+                     )}>
+                        {num === 0 ? <Sparkles className="w-4 h-4" /> : num}
+                     </div>
+                   ))
+                 )}
+               </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+               <button 
+                 onClick={() => setPreviewCartela(generateBingoCard())}
+                 className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-[10px] uppercase tracking-widest transition-all border border-white/10 flex items-center justify-center gap-2"
+               >
+                 Mostrar Nova Cartela
+               </button>
+               
+               <div className="grid grid-cols-2 gap-3 mt-2">
+                  <button 
+                    disabled={isBuying}
+                    onClick={() => handleBuy('pago')}
+                    className="py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:opacity-90 text-black font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Wallet className="w-4 h-4" /> Pago
+                  </button>
+                  <button 
+                    disabled={isBuying}
+                    onClick={() => handleBuy('fiado')}
+                    className="py-3 rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-700 hover:opacity-90 text-black font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Plus className="w-4 h-4" /> Fiado
+                  </button>
+               </div>
+
+               <button 
+                 onClick={() => setPreviewCartela(null)}
+                 className="w-full mt-2 py-3 text-[10px] text-gray-500 hover:text-white uppercase tracking-widest font-bold"
+               >
+                 Cancelar
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWinnerAnim && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-500">
+          <div className="bg-gradient-to-br from-yellow-500 to-yellow-700 border border-yellow-400/50 rounded-3xl p-8 max-w-sm w-full text-center shadow-[0_0_50px_rgba(212,175,55,0.4)] animate-in zoom-in duration-500">
+            <h2 className="text-3xl font-black text-black uppercase tracking-tighter mb-2 drop-shadow-md">
+              {showWinnerAnim === 'linha_1' ? '1ª LINHA!' : showWinnerAnim === 'linha_2' ? '2ª LINHA!' : 'BINGO!'}
+            </h2>
+            <p className="text-sm text-black/80 font-bold mb-6 uppercase tracking-widest">
+              Parabéns, você completou a meta!
+            </p>
+            <button 
+              onClick={() => setShowWinnerAnim(null)}
+              className="w-full py-4 bg-black text-yellow-500 font-bold uppercase tracking-widest rounded-xl hover:bg-neutral-900 transition-colors"
+            >
+              Continuar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
