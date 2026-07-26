@@ -97,6 +97,14 @@ export default function AdminLogin() {
             >
               Autenticar
             </button>
+            
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="w-full h-12 mt-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white font-bold transition-all uppercase tracking-widest border border-white/10"
+            >
+              Voltar ao Login
+            </button>
           </div>
         </form>
       </div>
