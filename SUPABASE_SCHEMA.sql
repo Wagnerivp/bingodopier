@@ -84,3 +84,8 @@ CREATE TRIGGER trigger_update_arrecadacao
 AFTER INSERT OR UPDATE ON cartelas
 FOR EACH ROW
 EXECUTE FUNCTION update_arrecadacao_rodada();
+
+-- Alterações solicitadas
+ALTER TABLE rodadas ADD COLUMN IF NOT EXISTS vencedor_id INTEGER REFERENCES customers(id);
+ALTER TABLE rodadas ADD COLUMN IF NOT EXISTS nome_vencedor VARCHAR(150);
+

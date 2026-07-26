@@ -35,7 +35,19 @@ export default function CustomerDashboard() {
 
     const subRodadas = supabase?.channel('rodadas_updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rodadas' }, (payload) => {
-        fetchActiveRodada();
+        const updated = payload.new as Rodada;
+        if (updated.status === 'aberta' || updated.status === 'em_andamento' || updated.status === 'finalizada') {
+           setActiveRodada(updated);
+           if (updated.status === 'finalizada' && updated.ganhador_cartela_cheia === parsedCustomer.id) {
+               confetti({
+                 particleCount: 150,
+                 spread: 100,
+                 origin: { y: 0.6 }
+               });
+           }
+        } else {
+           fetchActiveRodada();
+        }
       }).subscribe();
 
     const subCartelas = supabase?.channel('cartelas_updates')
@@ -84,6 +96,14 @@ export default function CustomerDashboard() {
 
   const handleBuy = async (method: 'pago' | 'fiado') => {
     if (!customer || !activeRodada) return;
+    
+    const totalCost = precoCartela * buyAmount;
+    
+    if (method === 'pago' && customer.saldo_carteira < totalCost) {
+      alert('Saldo insuficiente na carteira. Adicione saldo via PIX ou compre no Fiado.');
+      return;
+    }
+
     setIsBuying(true);
 
     try {
@@ -97,12 +117,10 @@ export default function CustomerDashboard() {
 
       await supabase!.from('cartelas').insert(newCartelas);
       
-      if (method === 'fiado') {
-        const totalCost = precoCartela * buyAmount;
-        await supabase!.from('customers').update({
-          saldo_carteira: customer.saldo_carteira - totalCost
-        }).eq('id', customer.id);
-      }
+      // Both reduce balance (Fiado allows negative balance)
+      await supabase!.from('customers').update({
+        saldo_carteira: customer.saldo_carteira - totalCost
+      }).eq('id', customer.id);
       
       confetti({
         particleCount: 50,
@@ -160,10 +178,34 @@ export default function CustomerDashboard() {
             <h2 className={cn("text-3xl font-mono font-bold tracking-tight", customer.saldo_carteira < 0 ? "text-red-400" : "text-emerald-400")}>
               R$ {customer.saldo_carteira.toFixed(2)}
             </h2>
-            <div className="mt-4 flex gap-2">
-              <button className="flex-1 py-2 px-3 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold text-white transition-colors flex items-center justify-center gap-2 border border-white/10 uppercase tracking-widest">
-                <Receipt className="w-4 h-4 text-yellow-500" />
-                Fechar Conta
+            <div className="mt-4 flex flex-col gap-3">
+              <div className="bg-black/40 border border-yellow-600/30 rounded-xl p-4">
+                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-2">Adicionar Saldo (PIX)</p>
+                <div className="flex flex-col gap-1 mb-3">
+                  <span className="text-sm font-mono font-bold text-white">Chave Celular: 22992040941</span>
+                  <span className="text-xs text-gray-400">Nome: Richard</span>
+                </div>
+                <a 
+                  href={`https://wa.me/5522992040941?text=${encodeURIComponent(`Olá, fiz um PIX para adicionar saldo. Meu nome é ${customer.nome_completo}. Segue o comprovante:`)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-full py-2 bg-gradient-to-r from-emerald-500 to-emerald-700 hover:opacity-90 rounded-lg text-xs font-bold text-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                >
+                  <Receipt className="w-4 h-4" />
+                  Enviar Comprovante
+                </a>
+              </div>
+              <button 
+                onClick={async () => {
+                  if (confirm('Deseja solicitar o resgate do seu saldo e fechar a conta? O caixa será notificado.')) {
+                    await supabase!.from('customers').update({ status_conta: 'solicitando_saque' }).eq('id', customer.id);
+                    alert('Solicitação enviada ao caixa! Aguarde o pagamento.');
+                  }
+                }}
+                className="w-full py-2 px-3 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold text-white transition-colors flex items-center justify-center gap-2 border border-white/10 uppercase tracking-widest"
+              >
+                <LogOut className="w-4 h-4 text-yellow-500" />
+                Fechar Conta / Retirar Saldo
               </button>
             </div>
           </div>
@@ -215,22 +257,34 @@ export default function CustomerDashboard() {
                     <button 
                       disabled={isBuying}
                       onClick={() => handleBuy('pago')}
-                      className="py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:opacity-90 text-black font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      className="py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:opacity-90 text-black font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                     >
-                      <CreditCard className="w-4 h-4" /> PIX
+                      <Wallet className="w-4 h-4" /> Usar Saldo
                     </button>
                     <button 
                       disabled={isBuying}
                       onClick={() => handleBuy('fiado')}
-                      className="py-3 rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-700 hover:opacity-90 text-black font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      className="py-3 rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-700 hover:opacity-90 text-black font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                     >
                       <Plus className="w-4 h-4" /> Fiado
                     </button>
                   </div>
                 </div>
-              ) : (
+              ) : activeRodada.status === 'em_andamento' ? (
                 <div className="mt-4 p-3 bg-red-950/30 border border-red-500/20 rounded-xl text-center text-[10px] uppercase font-bold tracking-widest text-red-400">
                   Sorteio iniciado. Compras bloqueadas.
+                </div>
+              ) : (
+                <div className="mt-4 p-4 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-center">
+                  <h4 className="text-emerald-400 font-bold uppercase tracking-widest text-xs mb-1">Rodada Finalizada</h4>
+                  {activeRodada.ganhador_cartela_cheia === customer.id ? (
+                    <p className="text-white font-bold">🎉 BINGO! VOCÊ BATEU CARTELA CHEIA! 🎉</p>
+                  ) : (
+                    <p className="text-gray-400 text-xs mt-2">
+                       Rodada Encerrada! Vencedor: <span className="text-white font-bold">{activeRodada.nome_vencedor}</span>.<br/> 
+                       Prepare-se para a próxima!
+                    </p>
+                  )}
                 </div>
               )}
             </div>

@@ -13,12 +13,12 @@ export default function TVDisplay() {
   const [activeRodada, setActiveRodada] = useState<Rodada | null>(null);
   const lastBallRef = useRef<number | null>(null);
 
-  const handleLogin = async (e: any) => {
-    e.preventDefault();
+  const handleLogin = async (e?: any, pinOverride?: string) => {
+    if (e) e.preventDefault();
     try {
       const { data } = await supabase!.from('admin_config').select('valor').eq('chave', 'tv_pin').single();
       
-      const inputPin = pin.trim();
+      const inputPin = (pinOverride || pin).trim();
       const dbPin = data?.valor?.trim();
 
       if ((data && dbPin === inputPin) || inputPin === '0508') {
@@ -28,7 +28,7 @@ export default function TVDisplay() {
       }
     } catch (err) {
       console.error(err);
-      if (pin.trim() === '0508') {
+      if ((pinOverride || pin).trim() === '0508') {
         setAuthorized(true);
       } else {
         setError('PIN Incorreto ou erro no banco');
@@ -47,12 +47,26 @@ export default function TVDisplay() {
         setActiveRodada(updated);
         
         // Check for new ball and speak
-        if (updated.bolas_sorteadas && updated.bolas_sorteadas.length > 0) {
+        if (updated.bolas_sorteadas && updated.bolas_sorteadas.length > 0 && updated.status !== 'finalizada') {
           const lastBall = updated.bolas_sorteadas[updated.bolas_sorteadas.length - 1];
           if (lastBall !== lastBallRef.current) {
             lastBallRef.current = lastBall;
             speak(`Bola número ${lastBall}`);
           }
+        }
+
+        if (updated.status === 'finalizada' && updated.ganhador_cartela_cheia) {
+            import('canvas-confetti').then((confetti) => {
+                confetti.default({
+                    particleCount: 500,
+                    spread: 360,
+                    origin: { y: 0.5 },
+                    colors: ['#EAB308', '#F59E0B', '#D97706', '#DC2626']
+                });
+                speak('Bingo! Temos um vencedor!');
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/1047/1047-preview.mp3');
+                audio.play().catch(e => console.error('Audio play failed', e));
+            });
         }
       }).subscribe();
 
@@ -110,6 +124,15 @@ export default function TVDisplay() {
           <button type="submit" className="w-full py-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-lg transition-colors">
             Acessar Painel
           </button>
+          <div className="mt-4 border-t border-neutral-800 pt-4">
+            <button
+              type="button"
+              onClick={() => handleLogin(undefined, '0508')}
+              className="w-full py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-400 font-bold text-sm transition-colors uppercase tracking-widest"
+            >
+              Acesso Rápido (Somente Tela LG WebOS)
+            </button>
+          </div>
         </form>
       </div>
     );
@@ -172,17 +195,16 @@ export default function TVDisplay() {
           </div>
           <AnimatePresence mode="wait">
             {lastBall ? (
-              <div className="flex flex-col items-center gap-4">
-                <div className="text-gray-500 text-sm uppercase tracking-[0.4em] font-light">Último Número</div>
+              <div className="flex flex-col items-center justify-center w-full h-full">
                 <motion.div
                   key={lastBall}
-                  initial={{ scale: 0, opacity: 0, rotate: -180 }}
+                  initial={{ scale: 0.5, opacity: 0, rotate: -15 }}
                   animate={{ scale: 1, opacity: 1, rotate: 0 }}
-                  exit={{ scale: 0, opacity: 0, rotate: 180 }}
-                  transition={{ type: "spring", bounce: 0.5, duration: 0.8 }}
-                  className="w-80 h-80 rounded-full bg-gradient-to-br from-white via-gray-300 to-gray-500 shadow-[0_0_100px_rgba(255,255,255,0.15)] ring-8 ring-black ring-offset-4 ring-offset-yellow-600/20 flex items-center justify-center relative overflow-hidden"
+                  exit={{ scale: 0.5, opacity: 0 }}
+                  transition={{ type: "spring", bounce: 0.4, duration: 0.8 }}
+                  className="flex items-center justify-center relative"
                 >
-                  <span className="text-[140px] font-black text-black leading-none select-none">
+                  <span className="text-[20rem] font-black text-yellow-400 drop-shadow-[0_0_50px_rgba(234,179,8,1)] leading-none select-none">
                     {lastBall}
                   </span>
                 </motion.div>
@@ -219,6 +241,24 @@ export default function TVDisplay() {
           </div>
         </div>
       </div>
+
+      {activeRodada.status === 'finalizada' && activeRodada.ganhador_cartela_cheia && (
+        <div className="absolute inset-0 bg-yellow-600/90 backdrop-blur-md z-50 flex items-center justify-center animate-pulse">
+          <motion.div 
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-red-700 rounded-3xl p-16 text-center text-white max-w-6xl w-full border-[12px] border-yellow-400 shadow-[0_0_150px_rgba(234,179,8,1)]"
+          >
+            <h1 className="text-9xl font-black uppercase mb-4 drop-shadow-[0_0_20px_rgba(255,255,255,0.8)]">BINGOOO!</h1>
+            <p className="text-6xl font-black uppercase tracking-widest text-yellow-300 drop-shadow-lg mb-8">
+               VENCEDOR: <br/><span className="text-white text-7xl mt-4 block">{activeRodada.nome_vencedor}</span>
+            </p>
+            <p className="text-5xl mt-8 font-mono bg-black/30 py-6 px-12 rounded-2xl inline-block border-4 border-yellow-400 text-yellow-400 font-bold drop-shadow-md">
+               Prêmio: R$ {activeRodada.premio_cartela_cheia.toFixed(2)}
+            </p>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

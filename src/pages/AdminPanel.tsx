@@ -86,12 +86,79 @@ export default function AdminPanel() {
       .from('rodadas')
       .update({ bolas_sorteadas: newBolas })
       .eq('id', activeRodada.id);
+
+    // Check for Cartela Cheia winner
+    const currentCartelas = cartelas.filter(c => c.rodada_id === activeRodada.id);
+    let cartelaCheiaWinnerId = null;
+
+    for (const c of currentCartelas) {
+      let missing = 0;
+      for (const row of c.numeros_json) {
+        for (const num of row) {
+          if (num !== 0 && !newBolas.includes(num)) {
+            missing++;
+          }
+        }
+      }
+      if (missing === 0) {
+        cartelaCheiaWinnerId = c.customer_id;
+        break;
+      }
+    }
+
+    if (cartelaCheiaWinnerId && !activeRodada.ganhador_cartela_cheia) {
+       const customer = customers.find(c => c.id === cartelaCheiaWinnerId);
+       if (customer) {
+          await supabase!.from('rodadas').update({ 
+             ganhador_cartela_cheia: customer.id,
+             vencedor_id: customer.id,
+             nome_vencedor: customer.nome_completo,
+             status: 'finalizada' 
+          }).eq('id', activeRodada.id);
+          
+          await supabase!.from('customers').update({ 
+             saldo_carteira: customer.saldo_carteira + activeRodada.premio_cartela_cheia 
+          }).eq('id', customer.id);
+          
+          alert(`BINGO! ${customer.nome_completo} bateu cartela cheia! Rodada encerrada. Inicie uma nova rodada.`);
+       }
+    }
+  };
+
+  const handleDeclareWinner = async (type: 'linha_1' | 'linha_2' | 'cartela_cheia', prizeAmount: number, customerId: number) => {
+    if (!activeRodada) return;
+    const customer = customers.find(c => c.id === customerId);
+    if (!customer) return;
+    
+    if (confirm(`Pagar prêmio de R$ ${prizeAmount.toFixed(2)} para ${customer.nome_completo}? O valor será adicionado ao saldo do cliente.`)) {
+      const updateData: any = { [`ganhador_${type}`]: customerId };
+      if (type === 'cartela_cheia') {
+        updateData.status = 'finalizada';
+        updateData.vencedor_id = customer.id;
+        updateData.nome_vencedor = customer.nome_completo;
+      }
+      
+      await supabase!.from('rodadas').update(updateData).eq('id', activeRodada.id);
+      await supabase!.from('customers').update({ saldo_carteira: customer.saldo_carteira + prizeAmount }).eq('id', customer.id);
+      alert('Prêmio pago com sucesso!');
+    }
   };
 
   const settleDebt = async (c: Customer) => {
     if (confirm(`Liquidar saldo de R$ ${c.saldo_carteira.toFixed(2)} de ${c.nome_completo}?`)) {
       await supabase!.from('customers').update({ saldo_carteira: 0 }).eq('id', c.id);
     }
+  };
+
+  const adjustBalance = async (c: Customer) => {
+    const amountStr = prompt(`Ajustar Saldo (PIX, Dinheiro, etc) para ${c.nome_completo}:\n\nDigite o valor para adicionar (ex: 50.00) ou subtrair (ex: -50.00):`);
+    if (!amountStr) return;
+    const amount = parseFloat(amountStr.replace(',', '.'));
+    if (isNaN(amount)) {
+      alert('Valor inválido');
+      return;
+    }
+    await supabase!.from('customers').update({ saldo_carteira: c.saldo_carteira + amount }).eq('id', c.id);
   };
 
   return (
@@ -154,11 +221,80 @@ export default function AdminPanel() {
                   >
                     SORTEAR BOLA
                   </button>
+
+                  <div className="flex flex-col gap-2 mt-2">
+                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Pagar Premiações</p>
+                    
+                    {!activeRodada.ganhador_linha_1 && (
+                      <div className="flex gap-2">
+                        <select id="winner-l1" className="bg-black/60 border border-white/10 text-xs text-white rounded-lg px-2 py-2 flex-1 focus:outline-none">
+                          <option value="">Ganhador 1ª Linha...</option>
+                          {customers.map(c => <option key={c.id} value={c.id}>{c.nome_completo}</option>)}
+                        </select>
+                        <button 
+                          onClick={() => {
+                            const select = document.getElementById('winner-l1') as HTMLSelectElement;
+                            const cid = parseInt(select.value);
+                            if (cid) handleDeclareWinner('linha_1', activeRodada.premio_linha_1, cid);
+                          }}
+                          className="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-black font-bold px-3 text-[10px] uppercase rounded-lg border border-emerald-600/30 transition-colors"
+                        >Pagar</button>
+                      </div>
+                    )}
+                    
+                    {!activeRodada.ganhador_linha_2 && (
+                      <div className="flex gap-2">
+                        <select id="winner-l2" className="bg-black/60 border border-white/10 text-xs text-white rounded-lg px-2 py-2 flex-1 focus:outline-none">
+                          <option value="">Ganhador 2ª Linha...</option>
+                          {customers.map(c => <option key={c.id} value={c.id}>{c.nome_completo}</option>)}
+                        </select>
+                        <button 
+                          onClick={() => {
+                            const select = document.getElementById('winner-l2') as HTMLSelectElement;
+                            const cid = parseInt(select.value);
+                            if (cid) handleDeclareWinner('linha_2', activeRodada.premio_linha_2, cid);
+                          }}
+                          className="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-black font-bold px-3 text-[10px] uppercase rounded-lg border border-emerald-600/30 transition-colors"
+                        >Pagar</button>
+                      </div>
+                    )}
+                    
+                    {!activeRodada.ganhador_cartela_cheia && (
+                      <div className="flex gap-2">
+                        <select id="winner-cc" className="bg-black/60 border border-white/10 text-xs text-white rounded-lg px-2 py-2 flex-1 focus:outline-none">
+                          <option value="">Cartela Cheia...</option>
+                          {customers.map(c => <option key={c.id} value={c.id}>{c.nome_completo}</option>)}
+                        </select>
+                        <button 
+                          onClick={() => {
+                            const select = document.getElementById('winner-cc') as HTMLSelectElement;
+                            const cid = parseInt(select.value);
+                            if (cid) handleDeclareWinner('cartela_cheia', activeRodada.premio_cartela_cheia, cid);
+                          }}
+                          className="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-black font-bold px-3 text-[10px] uppercase rounded-lg border border-emerald-600/30 transition-colors"
+                        >Pagar</button>
+                      </div>
+                    )}
+                  </div>
+
+                  {activeRodada.status === 'aberta' && (
+                    <button 
+                      onClick={async () => {
+                        if (confirm('Iniciar bingo e bloquear novas vendas de cartelas?')) {
+                          await supabase!.from('rodadas').update({ status: 'em_andamento' }).eq('id', activeRodada.id);
+                        }
+                      }}
+                      className="w-full py-3 mt-2 bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-500 font-bold rounded-xl border border-yellow-500/50 transition-colors uppercase tracking-widest text-xs"
+                    >
+                      Iniciar Bingo (Bloquear Compras)
+                    </button>
+                  )}
+
                   <button 
                     onClick={handleEndRodada}
-                    className="w-full py-3 bg-red-950/30 hover:bg-red-900/50 text-red-500 font-bold rounded-xl border border-red-500/20 transition-colors uppercase tracking-widest text-xs"
+                    className="w-full py-3 mt-2 bg-red-950/30 hover:bg-red-900/50 text-red-500 font-bold rounded-xl border border-red-500/20 transition-colors uppercase tracking-widest text-xs"
                   >
-                    Finalizar Rodada
+                    Encerrar Bingo
                   </button>
                 </div>
               </div>
@@ -177,9 +313,17 @@ export default function AdminPanel() {
             </div>
             <div className="flex-1 overflow-auto p-4 space-y-2">
               {customers.map(c => (
-                <div key={c.id} className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5">
+                <div key={c.id} className={cn(
+                  "flex items-center justify-between p-3 rounded-xl border",
+                  c.status_conta === 'solicitando_saque' ? "bg-red-950/40 border-red-500/50" : "bg-white/5 border-white/5"
+                )}>
                   <div className="flex flex-col">
-                    <span className="text-sm font-bold uppercase">{c.nome_completo}</span>
+                    <span className="text-sm font-bold uppercase flex items-center gap-2">
+                      {c.nome_completo}
+                      {c.status_conta === 'solicitando_saque' && (
+                        <span className="bg-red-500 text-black text-[9px] px-1.5 py-0.5 rounded-full animate-pulse">SAQUE SOLICITADO</span>
+                      )}
+                    </span>
                     <span className="text-[10px] text-gray-500 font-mono mt-0.5">{c.telefone}</span>
                   </div>
                   <div className="flex items-center gap-4">
@@ -194,14 +338,34 @@ export default function AdminPanel() {
                         R$ {c.saldo_carteira.toFixed(2)}
                       </span>
                     </div>
-                    {c.saldo_carteira !== 0 && (
+                    <div className="flex gap-2">
+                      {c.status_conta === 'solicitando_saque' && (
+                        <button 
+                          onClick={async () => {
+                            if (confirm(`Confirmar que o valor de R$ ${c.saldo_carteira.toFixed(2)} foi pago ao cliente?`)) {
+                              await supabase!.from('customers').update({ saldo_carteira: 0, status_conta: 'ativo' }).eq('id', c.id);
+                            }
+                          }}
+                          className="bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-black text-[10px] font-bold px-3 py-2 rounded uppercase tracking-widest transition-colors border border-red-600/30"
+                        >
+                          Valor Pago
+                        </button>
+                      )}
                       <button 
-                        onClick={() => settleDebt(c)}
-                        className="bg-yellow-600/20 hover:bg-yellow-600 text-yellow-500 hover:text-black text-xs font-bold px-4 py-2 rounded uppercase tracking-widest transition-colors border border-yellow-600/30"
+                        onClick={() => adjustBalance(c)}
+                        className="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-500 hover:text-black text-[10px] font-bold px-3 py-2 rounded uppercase tracking-widest transition-colors border border-emerald-600/30"
                       >
-                        Liquidar
+                        + Saldo
                       </button>
-                    )}
+                      {c.saldo_carteira !== 0 && (
+                        <button 
+                          onClick={() => settleDebt(c)}
+                          className="bg-yellow-600/20 hover:bg-yellow-600 text-yellow-500 hover:text-black text-[10px] font-bold px-3 py-2 rounded uppercase tracking-widest transition-colors border border-yellow-600/30"
+                        >
+                          Zerar
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -215,6 +379,24 @@ export default function AdminPanel() {
         </div>
 
       </div>
+      {activeRodada?.status === 'finalizada' && activeRodada?.ganhador_cartela_cheia && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-yellow-500/30 rounded-3xl p-8 max-w-md w-full text-center shadow-2xl animate-in zoom-in duration-300">
+            <h2 className="text-3xl font-black text-yellow-500 uppercase mb-2">Temos um vencedor!</h2>
+            <p className="text-white text-xl mb-4 font-bold">{activeRodada.nome_vencedor}</p>
+            <p className="text-sm text-gray-400 uppercase tracking-widest mb-6">
+              Prêmio Principal: <br/>
+              <span className="text-2xl text-emerald-400 font-mono mt-2 block">R$ {activeRodada.premio_cartela_cheia.toFixed(2)}</span>
+            </p>
+            <button 
+              onClick={() => setActiveRodada(null)}
+              className="w-full py-4 bg-yellow-500 hover:bg-yellow-400 text-black font-bold uppercase tracking-widest rounded-xl transition-colors"
+            >
+              Arquivar e Fechar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -19,6 +19,8 @@ export type Rodada = {
   ganhador_linha_1: number | null;
   ganhador_linha_2: number | null;
   ganhador_cartela_cheia: number | null;
+  vencedor_id: number | null;
+  nome_vencedor: string | null;
   created_at: string;
 };
 

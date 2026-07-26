@@ -122,12 +122,19 @@ export default function CustomerLogin() {
           </div>
         </form>
 
-        <div className="mt-8 text-center">
+        <div className="mt-8 flex flex-col items-center gap-4">
           <button 
             onClick={() => navigate('/admin')}
             className="text-xs text-gray-500 hover:text-yellow-500 transition-colors uppercase tracking-widest font-semibold"
           >
             Acesso Restrito (Caixa)
+          </button>
+          
+          <button 
+            onClick={() => navigate('/tv')}
+            className="text-[10px] text-gray-600 hover:text-white transition-colors uppercase tracking-widest font-bold px-4 py-2 rounded-full border border-gray-800 bg-white/5"
+          >
+            Painel TV (Telão)
           </button>
         </div>
       </div>
