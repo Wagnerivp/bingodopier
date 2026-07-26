@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Customer, Rodada, Cartela } from '../types';
@@ -13,6 +13,10 @@ export default function AdminPanel() {
   const [cartelas, setCartelas] = useState<Cartela[]>([]);
   const [loading, setLoading] = useState(false);
   const [showQR, setShowQR] = useState(false);
+  
+  const [autoDraw, setAutoDraw] = useState(false);
+  const drawTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pausedForLinha2 = useRef(false);
 
   useEffect(() => {
     if (!localStorage.getItem('bingo_admin')) {
@@ -29,8 +33,38 @@ export default function AdminPanel() {
 
     return () => {
       sub?.unsubscribe();
+      if (drawTimeoutRef.current) clearTimeout(drawTimeoutRef.current);
     };
   }, [navigate]);
+
+  useEffect(() => {
+    if (drawTimeoutRef.current) {
+       clearTimeout(drawTimeoutRef.current);
+    }
+    
+    if (!autoDraw || !activeRodada || activeRodada.status === 'finalizada') {
+       if (activeRodada?.status === 'finalizada') setAutoDraw(false);
+       return;
+    }
+
+    let interval = 8000;
+    
+    if (activeRodada.ganhador_linha_1 && !activeRodada.ganhador_linha_2) {
+       interval = 10000;
+    } else if (activeRodada.ganhador_linha_2) {
+       if (!pausedForLinha2.current) {
+          interval = 20000;
+          pausedForLinha2.current = true;
+       } else {
+          interval = 8000;
+       }
+    }
+
+    drawTimeoutRef.current = setTimeout(() => {
+       drawBall();
+    }, interval);
+
+  }, [autoDraw, activeRodada]);
 
   const fetchData = async () => {
     await Promise.all([fetchRodada(), fetchCustomers(), fetchCartelas()]);
@@ -59,6 +93,8 @@ export default function AdminPanel() {
 
   const handleStartRodada = async () => {
     setLoading(true);
+    pausedForLinha2.current = false;
+    setAutoDraw(false);
     await supabase!.from('rodadas').insert([{ status: 'aberta' }]);
     setLoading(false);
   };
@@ -84,46 +120,64 @@ export default function AdminPanel() {
     const drawn = possible[Math.floor(Math.random() * possible.length)];
     const newBolas = [...activeRodada.bolas_sorteadas, drawn];
 
-    await supabase!
-      .from('rodadas')
-      .update({ bolas_sorteadas: newBolas })
-      .eq('id', activeRodada.id);
-
-    // Check for Cartela Cheia winner
     const currentCartelas = cartelas.filter(c => c.rodada_id === activeRodada.id);
-    let cartelaCheiaWinnerId = null;
+    let winnerL1 = activeRodada.ganhador_linha_1;
+    let winnerL2 = activeRodada.ganhador_linha_2;
+    let cartelaCheiaWinnerId = activeRodada.ganhador_cartela_cheia;
 
     for (const c of currentCartelas) {
+      let lines = 0;
       let missing = 0;
-      for (const row of c.numeros_json) {
-        for (const num of row) {
-          if (num !== 0 && !newBolas.includes(num)) {
-            missing++;
-          }
-        }
+      
+      for (let r = 0; r < 5; r++) {
+         if (c.numeros_json[r].every((num: number) => num === 0 || newBolas.includes(num))) lines++;
+         for (let col = 0; col < 5; col++) {
+            if (c.numeros_json[r][col] !== 0 && !newBolas.includes(c.numeros_json[r][col])) missing++;
+         }
       }
-      if (missing === 0) {
-        cartelaCheiaWinnerId = c.customer_id;
-        break;
+      for (let col = 0; col < 5; col++) {
+         let colCompleted = true;
+         for (let r = 0; r < 5; r++) {
+            if (c.numeros_json[r][col] !== 0 && !newBolas.includes(c.numeros_json[r][col])) colCompleted = false;
+         }
+         if (colCompleted) lines++;
       }
+      
+      if (lines >= 1 && !winnerL1) winnerL1 = c.customer_id;
+      if (lines >= 2 && !winnerL2) winnerL2 = c.customer_id;
+      if (missing === 0 && !cartelaCheiaWinnerId) cartelaCheiaWinnerId = c.customer_id;
+    }
+
+    const updates: any = { bolas_sorteadas: newBolas };
+    
+    if (winnerL1 && !activeRodada.ganhador_linha_1) {
+       updates.ganhador_linha_1 = winnerL1;
+       const { data: cust } = await supabase!.from('customers').select('saldo_carteira').eq('id', winnerL1).single();
+       if (cust) await supabase!.from('customers').update({ saldo_carteira: cust.saldo_carteira + activeRodada.premio_linha_1 }).eq('id', winnerL1);
+    }
+    
+    if (winnerL2 && !activeRodada.ganhador_linha_2) {
+       updates.ganhador_linha_2 = winnerL2;
+       const { data: cust } = await supabase!.from('customers').select('saldo_carteira').eq('id', winnerL2).single();
+       if (cust) await supabase!.from('customers').update({ saldo_carteira: cust.saldo_carteira + activeRodada.premio_linha_2 }).eq('id', winnerL2);
     }
 
     if (cartelaCheiaWinnerId && !activeRodada.ganhador_cartela_cheia) {
+       updates.ganhador_cartela_cheia = cartelaCheiaWinnerId;
+       updates.vencedor_id = cartelaCheiaWinnerId;
        const customer = customers.find(c => c.id === cartelaCheiaWinnerId);
        if (customer) {
-          await supabase!.from('rodadas').update({ 
-             ganhador_cartela_cheia: customer.id,
-             vencedor_id: customer.id,
-             nome_vencedor: customer.nome_completo,
-             status: 'finalizada' 
-          }).eq('id', activeRodada.id);
-          
-          await supabase!.from('customers').update({ 
-             saldo_carteira: customer.saldo_carteira + activeRodada.premio_cartela_cheia 
-          }).eq('id', customer.id);
-          
-          alert(`BINGO! ${customer.nome_completo} bateu cartela cheia! Rodada encerrada. Inicie uma nova rodada.`);
+          updates.nome_vencedor = customer.nome_completo;
+          updates.status = 'finalizada';
+          const { data: cust } = await supabase!.from('customers').select('saldo_carteira').eq('id', cartelaCheiaWinnerId).single();
+          if (cust) await supabase!.from('customers').update({ saldo_carteira: cust.saldo_carteira + activeRodada.premio_cartela_cheia }).eq('id', cartelaCheiaWinnerId);
        }
+    }
+
+    await supabase!.from('rodadas').update(updates).eq('id', activeRodada.id);
+
+    if (updates.status === 'finalizada') {
+       alert('BINGO! Cartela cheia! Rodada encerrada.');
     }
   };
 
@@ -223,12 +277,27 @@ export default function AdminPanel() {
                 </div>
 
                 <div className="pt-4 border-t border-white/10 flex flex-col gap-3">
-                  <button 
-                    onClick={drawBall}
-                    className="w-full bg-gradient-to-r from-yellow-500 to-yellow-700 h-14 rounded-xl font-bold text-black uppercase tracking-widest shadow-[0_4px_20px_rgba(212,175,55,0.3)] hover:opacity-90 transition-all active:scale-95"
-                  >
-                    SORTEAR BOLA
-                  </button>
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={drawBall}
+                      disabled={autoDraw || activeRodada.status === 'finalizada'}
+                      className="flex-1 bg-gradient-to-r from-yellow-500 to-yellow-700 h-14 rounded-xl font-bold text-black uppercase tracking-widest shadow-[0_4px_20px_rgba(212,175,55,0.3)] hover:opacity-90 transition-all active:scale-95 disabled:opacity-50 disabled:grayscale"
+                    >
+                      SORTEAR BOLA
+                    </button>
+                    <button 
+                      onClick={() => setAutoDraw(!autoDraw)}
+                      disabled={activeRodada.status === 'finalizada'}
+                      className={cn(
+                         "h-14 px-4 rounded-xl font-bold uppercase tracking-widest transition-all border disabled:opacity-50",
+                         autoDraw 
+                            ? "bg-red-500/20 text-red-400 border-red-500/50 hover:bg-red-500/30" 
+                            : "bg-emerald-500/20 text-emerald-400 border-emerald-500/50 hover:bg-emerald-500/30"
+                      )}
+                    >
+                      {autoDraw ? 'Parar Auto' : 'Auto'}
+                    </button>
+                  </div>
 
                   <div className="flex flex-col gap-2 mt-2">
                     <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Pagar Premiações</p>

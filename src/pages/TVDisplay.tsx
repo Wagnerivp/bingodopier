@@ -183,6 +183,14 @@ export default function TVDisplay() {
                R$ {activeRodada.premio_cartela_cheia.toFixed(2)}
              </p>
           </div>
+          <div className="ml-2">
+            <button
+              onClick={() => setAuthorized(false)}
+              className="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 text-[10px] font-bold text-neutral-400 uppercase tracking-widest transition-colors"
+            >
+              Voltar<br/>ao Login
+            </button>
+          </div>
         </div>
       </header>
 

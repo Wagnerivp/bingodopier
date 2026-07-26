@@ -97,6 +97,12 @@ export default function CustomerDashboard() {
   const handleBuy = async (method: 'pago' | 'fiado') => {
     if (!customer || !activeRodada) return;
     
+    const currentCount = cartelas.filter(c => c.rodada_id === activeRodada.id).length;
+    if (currentCount + buyAmount > 5) {
+      alert(`Você já possui ${currentCount} cartela(s). O máximo permitido por rodada é 5.`);
+      return;
+    }
+
     const totalCost = precoCartela * buyAmount;
     
     if (method === 'pago' && customer.saldo_carteira < totalCost) {
@@ -241,38 +247,62 @@ export default function CustomerDashboard() {
 
               {activeRodada.status === 'aberta' ? (
                 <div className="mt-4 pt-4 border-t border-white/10">
-                  <p className="text-xs text-gray-300 mb-3 font-bold uppercase tracking-widest">Comprar Cartelas <span className="text-yellow-500 font-mono">(R$ {precoCartela.toFixed(2)})</span></p>
-                  <div className="flex gap-3 items-center mb-4">
-                    <button 
-                      onClick={() => setBuyAmount(Math.max(1, buyAmount - 1))}
-                      className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white font-bold"
-                    >-</button>
-                    <div className="flex-1 text-center font-bold text-xl">{buyAmount}</div>
-                    <button 
-                      onClick={() => setBuyAmount(buyAmount + 1)}
-                      className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white font-bold"
-                    >+</button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button 
-                      disabled={isBuying}
-                      onClick={() => handleBuy('pago')}
-                      className="py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:opacity-90 text-black font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      <Wallet className="w-4 h-4" /> Usar Saldo
-                    </button>
-                    <button 
-                      disabled={isBuying}
-                      onClick={() => handleBuy('fiado')}
-                      className="py-3 rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-700 hover:opacity-90 text-black font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      <Plus className="w-4 h-4" /> Fiado
-                    </button>
-                  </div>
+                  {activeCartelas.length >= 5 ? (
+                    <div className="text-center p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+                      <p className="text-xs text-yellow-500 font-bold uppercase tracking-widest">Limite Atingido</p>
+                      <p className="text-[10px] text-gray-400 mt-1">Você já comprou o máximo de 5 cartelas.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs text-gray-300 mb-3 font-bold uppercase tracking-widest">Comprar Cartelas <span className="text-yellow-500 font-mono">(R$ {precoCartela.toFixed(2)})</span></p>
+                      <div className="flex gap-3 items-center mb-4">
+                        <button 
+                          onClick={() => setBuyAmount(Math.max(1, buyAmount - 1))}
+                          className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white font-bold"
+                        >-</button>
+                        <div className="flex-1 text-center font-bold text-xl">{buyAmount}</div>
+                        <button 
+                          onClick={() => setBuyAmount(Math.min(5 - activeCartelas.length, buyAmount + 1))}
+                          className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white font-bold"
+                        >+</button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button 
+                          disabled={isBuying}
+                          onClick={() => handleBuy('pago')}
+                          className="py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:opacity-90 text-black font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                          <Wallet className="w-4 h-4" /> Usar Saldo
+                        </button>
+                        <button 
+                          disabled={isBuying}
+                          onClick={() => handleBuy('fiado')}
+                          className="py-3 rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-700 hover:opacity-90 text-black font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                          <Plus className="w-4 h-4" /> Fiado
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : activeRodada.status === 'em_andamento' ? (
-                <div className="mt-4 p-3 bg-red-950/30 border border-red-500/20 rounded-xl text-center text-[10px] uppercase font-bold tracking-widest text-red-400">
-                  Sorteio iniciado. Compras bloqueadas.
+                <div className="mt-4">
+                  <div className="p-3 mb-4 bg-red-950/30 border border-red-500/20 rounded-xl text-center text-[10px] uppercase font-bold tracking-widest text-red-400">
+                    Sorteio iniciado. Compras bloqueadas.
+                  </div>
+                  <div className="pt-4 border-t border-white/10">
+                    <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Bolas Sorteadas ({activeRodada.bolas_sorteadas?.length || 0})</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {activeRodada.bolas_sorteadas?.map((bola, index) => (
+                        <div key={index} className="w-8 h-8 rounded-full bg-yellow-500 text-black font-bold flex items-center justify-center text-sm shadow-[0_0_10px_rgba(234,179,8,0.4)] animate-in zoom-in">
+                          {bola}
+                        </div>
+                      ))}
+                      {(!activeRodada.bolas_sorteadas || activeRodada.bolas_sorteadas.length === 0) && (
+                        <p className="text-xs text-gray-500">Aguardando o primeiro número...</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="mt-4 p-4 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-center">
