@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Customer, Rodada, Cartela } from '../types';
 import { Play, Square, Dices, LogOut, CheckCircle2, UserX, QrCode } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, generateBingoCard } from '../lib/utils';
 import QRCode from 'react-qr-code';
 
 export default function AdminPanel() {
@@ -13,6 +13,8 @@ export default function AdminPanel() {
   const [cartelas, setCartelas] = useState<Cartela[]>([]);
   const [loading, setLoading] = useState(false);
   const [showQR, setShowQR] = useState(false);
+  const [viewingCartelasForCustomer, setViewingCartelasForCustomer] = useState<Customer | null>(null);
+  const [totalLucroBar, setTotalLucroBar] = useState(0);
   
   const [autoDraw, setAutoDraw] = useState(false);
   const drawTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -26,7 +28,7 @@ export default function AdminPanel() {
     fetchData();
 
     const sub = supabase?.channel('admin_updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rodadas' }, () => fetchRodada())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rodadas' }, () => { fetchRodada(); fetchTotalLucro(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => fetchCustomers())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cartelas' }, () => fetchCartelas())
       .subscribe();
@@ -67,7 +69,14 @@ export default function AdminPanel() {
   }, [autoDraw, activeRodada]);
 
   const fetchData = async () => {
-    await Promise.all([fetchRodada(), fetchCustomers(), fetchCartelas()]);
+    await Promise.all([fetchRodada(), fetchCustomers(), fetchCartelas(), fetchTotalLucro()]);
+  };
+
+  const fetchTotalLucro = async () => {
+    const { data } = await supabase!.from('rodadas').select('lucro_bar');
+    if (data) {
+      setTotalLucroBar(data.reduce((acc, curr) => acc + (curr.lucro_bar || 0), 0));
+    }
   };
 
   const fetchRodada = async () => {
@@ -225,6 +234,10 @@ export default function AdminPanel() {
           <p className="text-[10px] text-yellow-500/80 uppercase tracking-widest font-semibold">Cassino Pier do Costa</p>
         </div>
         <div className="flex items-center gap-4">
+          <div className="bg-emerald-900/30 border border-emerald-500/20 px-4 py-2 rounded-lg flex flex-col items-end">
+            <span className="text-[9px] uppercase tracking-widest text-emerald-500 font-bold">Saldo do Bar</span>
+            <span className="text-sm font-mono font-black text-emerald-400">R$ {totalLucroBar.toFixed(2)}</span>
+          </div>
           <button onClick={() => setShowQR(true)} className="text-gray-400 hover:text-yellow-500 transition-colors flex items-center gap-2 text-xs font-bold uppercase tracking-widest bg-white/5 px-3 py-2 rounded-lg border border-white/10">
             <QrCode className="w-4 h-4" />
             Link da TV
@@ -404,16 +417,29 @@ export default function AdminPanel() {
                     <span className="text-[10px] text-gray-500 font-mono mt-0.5">{c.telefone}</span>
                   </div>
                   <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="text-[10px] uppercase text-gray-500 font-bold">Saldo</p>
-                      <span className={cn(
-                        "text-xs font-bold font-mono",
-                        c.saldo_carteira < 0 ? "text-red-400" : 
-                        c.saldo_carteira > 0 ? "text-emerald-400" : 
-                        "text-yellow-500/70"
-                      )}>
-                        R$ {c.saldo_carteira.toFixed(2)}
-                      </span>
+                    <div className="text-right flex items-center gap-4">
+                      {activeRodada && (
+                        <button 
+                          onClick={() => setViewingCartelasForCustomer(c)}
+                          className="text-center bg-black/40 hover:bg-white/5 transition-colors px-3 py-1 rounded-lg border border-white/5 cursor-pointer"
+                        >
+                          <p className="text-[9px] uppercase text-gray-500 font-bold mb-0.5">Cartelas</p>
+                          <span className="text-xs font-bold text-yellow-500">
+                            {cartelas.filter(cart => cart.customer_id === c.id && cart.rodada_id === activeRodada.id).length}
+                          </span>
+                        </button>
+                      )}
+                      <div>
+                        <p className="text-[10px] uppercase text-gray-500 font-bold">Saldo</p>
+                        <span className={cn(
+                          "text-xs font-bold font-mono",
+                          c.saldo_carteira < 0 ? "text-red-400" : 
+                          c.saldo_carteira > 0 ? "text-emerald-400" : 
+                          "text-yellow-500/70"
+                        )}>
+                          R$ {c.saldo_carteira.toFixed(2)}
+                        </span>
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       {c.status_conta === 'solicitando_saque' && (
@@ -496,6 +522,105 @@ export default function AdminPanel() {
             >
               Fechar
             </button>
+          </div>
+        </div>
+      )}
+      {viewingCartelasForCustomer && activeRodada && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-white/10 rounded-3xl p-6 max-w-4xl w-full flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-6">
+               <div>
+                  <h2 className="text-xl font-bold text-white uppercase tracking-widest mb-1">Cartelas de {viewingCartelasForCustomer.nome_completo}</h2>
+                  <p className="text-xs text-gray-400">Visualizando cartelas da rodada #{activeRodada.id}</p>
+               </div>
+               <div className="flex gap-2">
+                  {activeRodada.status === 'aberta' && (
+                     <button 
+                        onClick={async () => {
+                           if (cartelas.filter(c => c.customer_id === viewingCartelasForCustomer.id && c.rodada_id === activeRodada.id).length >= 5) {
+                              alert('Limite de 5 cartelas atingido.');
+                              return;
+                           }
+                           const { data: config } = await supabase!.from('admin_config').select('valor').eq('chave', 'preco_cartela').single();
+                           const preco = config ? parseFloat(config.valor) : 1;
+                           
+                           await supabase!.from('cartelas').insert([{
+                              customer_id: viewingCartelasForCustomer.id,
+                              rodada_id: activeRodada.id,
+                              numeros_json: generateBingoCard(),
+                              status_pagamento: 'fiado',
+                              preco: preco
+                           }]);
+                           
+                           const novaArrecadacao = (activeRodada.arrecadacao_total || 0) + preco;
+                           const premio1 = novaArrecadacao * 0.10;
+                           const premio2 = novaArrecadacao * 0.20;
+                           const premioCheia = novaArrecadacao * 0.60;
+                           const lucroBar = novaArrecadacao * 0.10;
+                     
+                           await supabase!.from('rodadas').update({
+                             arrecadacao_total: novaArrecadacao,
+                             premio_linha_1: premio1,
+                             premio_linha_2: premio2,
+                             premio_cartela_cheia: premioCheia,
+                             lucro_bar: lucroBar
+                           }).eq('id', activeRodada.id);
+
+                           await supabase!.from('customers').update({
+                              saldo_carteira: viewingCartelasForCustomer.saldo_carteira - preco
+                           }).eq('id', viewingCartelasForCustomer.id);
+                        }}
+                        className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black font-bold uppercase tracking-widest rounded-xl transition-colors text-xs"
+                     >
+                        Vender Cartela (Fiado)
+                     </button>
+                  )}
+                  <button 
+                     onClick={() => setViewingCartelasForCustomer(null)}
+                     className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-bold uppercase tracking-widest rounded-xl transition-colors text-xs"
+                  >
+                     Fechar
+                  </button>
+               </div>
+            </div>
+            <div className="flex-1 overflow-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-4">
+               {cartelas.filter(c => c.customer_id === viewingCartelasForCustomer.id && c.rodada_id === activeRodada.id).map(cartela => (
+                  <div key={cartela.id} className="bg-black/40 border border-white/10 rounded-2xl p-4 shadow-xl">
+                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Cartela #{cartela.id}</p>
+                     <div className="grid grid-cols-5 gap-1 text-center mb-1">
+                        {['B', 'I', 'N', 'G', 'O'].map((l) => (
+                           <div key={l} className="text-yellow-500 font-black text-[10px] md:text-sm">{l}</div>
+                        ))}
+                     </div>
+                     <div className="grid grid-cols-5 gap-1">
+                        {cartela.numeros_json.map((row: number[], rIdx: number) => 
+                           row.map((num: number, cIdx: number) => {
+                              const isMarked = activeRodada?.bolas_sorteadas?.includes(num);
+                              const isFree = num === 0;
+                              return (
+                                 <div 
+                                    key={`${rIdx}-${cIdx}`}
+                                    className={cn(
+                                       "aspect-square flex items-center justify-center rounded text-[10px] md:text-xs font-bold",
+                                       isFree ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30" :
+                                       isMarked ? "bg-yellow-500 text-black shadow-[0_0_10px_rgba(234,179,8,0.4)]" :
+                                       "bg-white/5 text-white"
+                                    )}
+                                 >
+                                    {isFree ? "☆" : num}
+                                 </div>
+                              );
+                           })
+                        )}
+                     </div>
+                  </div>
+               ))}
+               {cartelas.filter(c => c.customer_id === viewingCartelasForCustomer.id && c.rodada_id === activeRodada.id).length === 0 && (
+                  <div className="col-span-full py-8 text-center text-gray-500 uppercase tracking-widest text-xs">
+                     Nenhuma cartela comprada.
+                  </div>
+               )}
+            </div>
           </div>
         </div>
       )}

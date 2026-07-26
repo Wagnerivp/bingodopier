@@ -132,6 +132,20 @@ export default function CustomerDashboard() {
         preco: precoCartela
       }]);
       
+      const novaArrecadacao = (activeRodada.arrecadacao_total || 0) + totalCost;
+      const premio1 = novaArrecadacao * 0.10;
+      const premio2 = novaArrecadacao * 0.20;
+      const premioCheia = novaArrecadacao * 0.60;
+      const lucroBar = novaArrecadacao * 0.10;
+
+      await supabase!.from('rodadas').update({
+        arrecadacao_total: novaArrecadacao,
+        premio_linha_1: premio1,
+        premio_linha_2: premio2,
+        premio_cartela_cheia: premioCheia,
+        lucro_bar: lucroBar
+      }).eq('id', activeRodada.id);
+
       await supabase!.from('customers').update({
         saldo_carteira: customer.saldo_carteira - totalCost
       }).eq('id', customer.id);
@@ -209,6 +223,39 @@ export default function CustomerDashboard() {
                   Enviar Comprovante
                 </a>
               </div>
+
+              <div className="pt-2">
+                {activeRodada?.status === 'aberta' ? (
+                  activeCartelas.length >= 5 ? (
+                    <div className="text-center p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+                      <p className="text-xs text-yellow-500 font-bold uppercase tracking-widest">Limite Atingido</p>
+                      <p className="text-[10px] text-gray-400 mt-1">Você já comprou o máximo de 5 cartelas.</p>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => setPreviewCartela(generateBingoCard())}
+                      className="w-full py-4 rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-700 hover:opacity-90 text-black font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center shadow-[0_0_15px_rgba(212,175,55,0.3)]"
+                    >
+                      Comprar Cartela para Rodada #{activeRodada.id} (R$ {precoCartela.toFixed(2)})
+                    </button>
+                  )
+                ) : activeRodada?.status === 'em_andamento' ? (
+                  <button 
+                    disabled
+                    className="w-full py-4 rounded-xl bg-white/5 border border-white/10 text-gray-500 font-bold text-[10px] uppercase tracking-widest cursor-not-allowed"
+                  >
+                    Sorteio em Andamento - Compras Bloqueadas
+                  </button>
+                ) : (
+                  <button 
+                    disabled
+                    className="w-full py-4 rounded-xl bg-white/5 border border-white/10 text-gray-500 font-bold text-xs uppercase tracking-widest cursor-not-allowed"
+                  >
+                    Nenhuma Rodada Aberta
+                  </button>
+                )}
+              </div>
+
               <button 
                 onClick={async () => {
                   if (confirm('Deseja solicitar o resgate do seu saldo e fechar a conta? O caixa será notificado.')) {
@@ -248,28 +295,26 @@ export default function CustomerDashboard() {
                   </p>
                 </div>
                 <div className="text-right">
+                  <div className="flex gap-4 justify-end mb-2">
+                    <div className="text-right">
+                      <p className="text-[9px] text-gray-500 uppercase tracking-widest font-bold">1ª Linha</p>
+                      <p className="font-mono text-xs font-bold text-yellow-500/70">R$ {activeRodada.premio_linha_1.toFixed(2)}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[9px] text-gray-500 uppercase tracking-widest font-bold">2ª Linha</p>
+                      <p className="font-mono text-xs font-bold text-yellow-500/70">R$ {activeRodada.premio_linha_2.toFixed(2)}</p>
+                    </div>
+                  </div>
                   <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Prêmio Máximo</p>
-                  <p className="font-mono font-bold text-yellow-400">R$ {activeRodada.premio_cartela_cheia.toFixed(2)}</p>
+                  <p className="font-mono font-bold text-yellow-400 text-lg">R$ {activeRodada.premio_cartela_cheia.toFixed(2)}</p>
                 </div>
               </div>
 
               {activeRodada.status === 'aberta' ? (
-                <div className="mt-4 pt-4 border-t border-white/10">
-                  {activeCartelas.length >= 5 ? (
-                    <div className="text-center p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
-                      <p className="text-xs text-yellow-500 font-bold uppercase tracking-widest">Limite Atingido</p>
-                      <p className="text-[10px] text-gray-400 mt-1">Você já comprou o máximo de 5 cartelas.</p>
-                    </div>
-                  ) : (
-                    <>
-                      <button 
-                        onClick={() => setPreviewCartela(generateBingoCard())}
-                        className="w-full py-4 rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-700 hover:opacity-90 text-black font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center shadow-[0_0_15px_rgba(212,175,55,0.3)]"
-                      >
-                        Comprar Cartela (R$ {precoCartela.toFixed(2)})
-                      </button>
-                    </>
-                  )}
+                <div className="mt-4 pt-4 border-t border-white/10 text-center">
+                   <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">
+                      O sorteio iniciará em breve.
+                   </p>
                 </div>
               ) : activeRodada.status === 'em_andamento' ? (
                 <div className="mt-4">
