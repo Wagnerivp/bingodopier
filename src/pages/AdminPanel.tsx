@@ -205,6 +205,8 @@ export default function AdminPanel() {
       
       await supabase!.from('rodadas').update(updateData).eq('id', activeRodada.id);
       await supabase!.from('customers').update({ saldo_carteira: customer.saldo_carteira + prizeAmount }).eq('id', customer.id);
+      await fetchRodada();
+      await fetchCustomers();
       alert('Prêmio pago com sucesso!');
     }
   };
@@ -212,6 +214,7 @@ export default function AdminPanel() {
   const settleDebt = async (c: Customer) => {
     if (confirm(`Liquidar saldo de R$ ${c.saldo_carteira.toFixed(2)} de ${c.nome_completo}?`)) {
       await supabase!.from('customers').update({ saldo_carteira: 0 }).eq('id', c.id);
+      await fetchCustomers();
     }
   };
 
@@ -224,6 +227,7 @@ export default function AdminPanel() {
       return;
     }
     await supabase!.from('customers').update({ saldo_carteira: c.saldo_carteira + amount }).eq('id', c.id);
+    await fetchCustomers();
   };
 
   return (
@@ -544,13 +548,18 @@ export default function AdminPanel() {
                            const { data: config } = await supabase!.from('admin_config').select('valor').eq('chave', 'preco_cartela').single();
                            const preco = config ? parseFloat(config.valor) : 1;
                            
-                           await supabase!.from('cartelas').insert([{
+                           const { error: insertError } = await supabase!.from('cartelas').insert([{
                               customer_id: viewingCartelasForCustomer.id,
                               rodada_id: activeRodada.id,
                               numeros_json: generateBingoCard(),
+                              marcadas_json: [],
                               status_pagamento: 'fiado',
                               preco: preco
                            }]);
+                           if (insertError) {
+                              alert('Erro DB: ' + insertError.message);
+                              throw insertError;
+                           }
                            
                            const novaArrecadacao = (activeRodada.arrecadacao_total || 0) + preco;
                            const premio1 = novaArrecadacao * 0.10;
@@ -569,6 +578,10 @@ export default function AdminPanel() {
                            await supabase!.from('customers').update({
                               saldo_carteira: viewingCartelasForCustomer.saldo_carteira - preco
                            }).eq('id', viewingCartelasForCustomer.id);
+                           await fetchCartelas();
+                           await fetchTotalLucro();
+                           await fetchCustomers();
+                           setViewingCartelasForCustomer({ ...viewingCartelasForCustomer, saldo_carteira: viewingCartelasForCustomer.saldo_carteira - preco });
                         }}
                         className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black font-bold uppercase tracking-widest rounded-xl transition-colors text-xs"
                      >

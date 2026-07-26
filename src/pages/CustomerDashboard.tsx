@@ -17,6 +17,7 @@ export default function CustomerDashboard() {
   const [precoCartela, setPrecoCartela] = useState(1);
   const [previewCartela, setPreviewCartela] = useState<number[][] | null>(null);
   const [showWinnerAnim, setShowWinnerAnim] = useState<string | null>(null);
+  const [gameMode, setGameMode] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem('bingo_customer');
@@ -124,13 +125,18 @@ export default function CustomerDashboard() {
     setIsBuying(true);
 
     try {
-      await supabase!.from('cartelas').insert([{
+      const { error: insertError } = await supabase!.from('cartelas').insert([{
         customer_id: customer.id,
         rodada_id: activeRodada.id,
         numeros_json: previewCartela,
+        marcadas_json: [],
         status_pagamento: method,
         preco: precoCartela
       }]);
+      if (insertError) {
+        alert('Erro DB: ' + insertError.message);
+        throw insertError;
+      }
       
       const novaArrecadacao = (activeRodada.arrecadacao_total || 0) + totalCost;
       const premio1 = novaArrecadacao * 0.10;
@@ -150,6 +156,9 @@ export default function CustomerDashboard() {
         saldo_carteira: customer.saldo_carteira - totalCost
       }).eq('id', customer.id);
       
+      setCustomer({ ...customer, saldo_carteira: customer.saldo_carteira - totalCost });
+      localStorage.setItem('bingo_customer', JSON.stringify({ ...customer, saldo_carteira: customer.saldo_carteira - totalCost }));
+      
       confetti({
         particleCount: 50,
         spread: 60,
@@ -158,6 +167,8 @@ export default function CustomerDashboard() {
       });
 
       setPreviewCartela(null);
+      await fetchCartelas(customer.id);
+      await fetchActiveRodada();
     } catch (error) {
       console.error(error);
       alert('Erro ao comprar cartelas');
@@ -177,6 +188,14 @@ export default function CustomerDashboard() {
 
   const activeCartelas = cartelas.filter(c => c.rodada_id === activeRodada?.id);
 
+  useEffect(() => {
+    if (activeRodada?.status === 'em_andamento' && activeCartelas.length > 0) {
+      setGameMode(true);
+    } else if (activeRodada?.status === 'finalizada') {
+      setGameMode(false);
+    }
+  }, [activeRodada?.status, activeCartelas.length]);
+
   return (
     <div className="flex-1 flex flex-col pb-24 relative z-10 overflow-auto">
       {/* Header / Wallet */}
@@ -192,12 +211,13 @@ export default function CustomerDashboard() {
             </div>
           </div>
           
-          <button onClick={logout} className="p-2 text-gray-500 hover:text-yellow-500 transition-colors">
+          <div className="flex items-center gap-2">{gameMode && (<button onClick={() => setGameMode(false)} className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-[10px] uppercase tracking-widest rounded-lg border border-white/10 transition-colors">Lobby</button>)}<button onClick={logout} className="p-2 text-gray-500 hover:text-yellow-500 transition-colors">
             <LogOut className="w-5 h-5" />
           </button>
+          </div>
         </div>
 
-        <div className="max-w-md mx-auto px-4 pb-6">
+        {!gameMode && (<div className="max-w-md mx-auto px-4 pb-6">
           <div className="bg-white/5 border border-white/10 rounded-2xl p-5 shadow-xl relative overflow-hidden backdrop-blur-sm">
             <div className="absolute top-0 right-0 p-4 opacity-10">
               <Wallet className="w-16 h-16 text-yellow-500" />
@@ -224,21 +244,31 @@ export default function CustomerDashboard() {
                 </a>
               </div>
 
-              <div className="pt-2">
+              <div className="pt-2 flex flex-col gap-2">
                 {activeRodada?.status === 'aberta' ? (
-                  activeCartelas.length >= 5 ? (
-                    <div className="text-center p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
-                      <p className="text-xs text-yellow-500 font-bold uppercase tracking-widest">Limite Atingido</p>
-                      <p className="text-[10px] text-gray-400 mt-1">Você já comprou o máximo de 5 cartelas.</p>
-                    </div>
-                  ) : (
-                    <button 
-                      onClick={() => setPreviewCartela(generateBingoCard())}
-                      className="w-full py-4 rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-700 hover:opacity-90 text-black font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center shadow-[0_0_15px_rgba(212,175,55,0.3)]"
-                    >
-                      Comprar Cartela para Rodada #{activeRodada.id} (R$ {precoCartela.toFixed(2)})
-                    </button>
-                  )
+                  <>
+                    {activeCartelas.length >= 5 ? (
+                      <div className="text-center p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+                        <p className="text-xs text-yellow-500 font-bold uppercase tracking-widest">Limite Atingido</p>
+                        <p className="text-[10px] text-gray-400 mt-1">Você já comprou o máximo de 5 cartelas.</p>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={() => setPreviewCartela(generateBingoCard())}
+                        className="w-full py-4 rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-700 hover:opacity-90 text-black font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center shadow-[0_0_15px_rgba(212,175,55,0.3)]"
+                      >
+                        Comprar Cartela para Rodada #{activeRodada.id} (R$ {precoCartela.toFixed(2)})
+                      </button>
+                    )}
+                    {activeCartelas.length > 0 && (
+                      <button
+                        onClick={() => setGameMode(true)}
+                        className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] border border-emerald-500/50"
+                      >
+                        Ir para o Jogo
+                      </button>
+                    )}
+                  </>
                 ) : activeRodada?.status === 'em_andamento' ? (
                   <button 
                     disabled
@@ -271,6 +301,7 @@ export default function CustomerDashboard() {
             </div>
           </div>
         </div>
+        )}
       </div>
 
       <div className="max-w-md mx-auto p-4 space-y-6 w-full">

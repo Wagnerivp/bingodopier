@@ -1,0 +1,8 @@
+              <p className="font-bold text-white truncate max-w-[120px]">{customer.nome_completo}</p>
+            </div>
+          </div>
+          
+          <button onClick={logout} className="p-2 text-gray-500 hover:text-yellow-500 transition-colors">
+            <LogOut className="w-5 h-5" />
+          </button>
+        </div>
